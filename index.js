@@ -436,5 +436,20 @@ process.on('unhandledRejection', error => {
     console.error('Unhandled promise rejection:', error);
 });
 
-// Login to Discord with your client's token
-client.login(config.token).catch(console.error);
+// Start a simple HTTP server for health checks
+const http = require('http');
+const server = http.createServer((req, res) => {
+    if (req.url === '/health') {
+        res.writeHead(200);
+        res.end('OK');
+    } else {
+        res.writeHead(404);
+        res.end();
+    }
+});
+
+server.listen(8080, '0.0.0.0', () => {
+    console.log('Health check server running on port 8080');    
+    // Login to Discord after health server is ready
+    client.login(config.token).catch(console.error);
+});

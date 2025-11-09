@@ -25,6 +25,9 @@ RUN npm install --only=production
 # Bundle app source
 COPY . .
 
+# Expose health check port
+EXPOSE 8080
+
 # Run the bot
 CMD [ "node", "index.js" ]
 

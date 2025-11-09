@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: discord-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-UTC}
+    # Uncomment if you need to use host network mode
+    # network_mode: host
+    # Uncomment if you want to mount the .env file directly
+    # volumes:
+    #   - ./.env:/usr/src/app/.env

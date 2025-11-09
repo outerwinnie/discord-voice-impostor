@@ -437,4 +437,4 @@ process.on('unhandledRejection', error => {
 });
 
 // Login to Discord with your client's token
-client.login(token).catch(console.error);
+client.login(config.token).catch(console.error);

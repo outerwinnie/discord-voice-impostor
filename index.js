@@ -181,24 +181,26 @@ function handleVoiceStateUpdate(oldState, newState) {
     }
 }
 
-function safeDisconnect() {
+function safeDisconnect(delay = 3000) {
     // Clear any existing timers
     if (sessionTimer) clearTimeout(sessionTimer);
     if (nextSessionTimeout) clearTimeout(nextSessionTimeout);
-    
+
     // Remove voice state listener
     client.off('voiceStateUpdate', handleVoiceStateUpdate);
-    
-    // Disconnect if connected
+
     if (connection) {
-        try {
-            connection.destroy();
-            console.log('Disconnected from voice channel');
-        } catch (error) {
-            console.error('Error disconnecting:', error);
-        } finally {
-            connection = null;
-        }
+        console.log(`Waiting ${delay / 1000} seconds before disconnecting...`);
+        setTimeout(() => {
+            try {
+                connection.destroy();
+                console.log('Disconnected from voice channel');
+            } catch (error) {
+                console.error('Error disconnecting:', error);
+            } finally {
+                connection = null;
+            }
+        }, delay);
     }
 }
 

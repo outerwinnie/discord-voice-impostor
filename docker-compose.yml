@@ -2,15 +2,29 @@ version: '3.8'
 
 services:
   bot:
-    build: .
+    build: 
+      context: .
+      args:
+        - NODE_ENV=production
     container_name: discord-bot
     restart: unless-stopped
-    env_file: .env
     environment:
       - NODE_ENV=production
-      - TZ=${TZ:-UTC}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - GUILD_ID=${GUILD_ID}
+      - VOICE_CHANNEL_ID=${VOICE_CHANNEL_ID}
+      - TZ=${TZ:-Europe/Madrid}
+      - ACTIVE_HOUR_START=${ACTIVE_HOUR_START:-16}
+      - ACTIVE_HOUR_END=${ACTIVE_HOUR_END:-23}
+      - SESSION_DURATION_MIN=${SESSION_DURATION_MIN:-34}
+      - SESSION_DURATION_MAX=${SESSION_DURATION_MAX:-72}
+      - SESSION_DELAY_MIN=${SESSION_DELAY_MIN:-75}
+      - SESSION_DELAY_MAX=${SESSION_DELAY_MAX:-105}
+    # For better logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Uncomment if you need to use host network mode
     # network_mode: host
-    # Uncomment if you want to mount the .env file directly
-    # volumes:
-    #   - ./.env:/usr/src/app/.env

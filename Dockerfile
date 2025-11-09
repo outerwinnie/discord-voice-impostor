@@ -12,17 +12,22 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /usr/src/app
 
+# Set build arguments
+ARG NODE_ENV=production
+ENV NODE_ENV=${NODE_ENV}
+
 # Copy package files
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install --production
+RUN npm install --only=production
 
 # Bundle app source
 COPY . .
 
-# Set environment variables
-ENV NODE_ENV=production
-
 # Run the bot
 CMD [ "node", "index.js" ]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD node -e "require('http').request('http://localhost:3000/health', console.log).on('error', process.exit(1)).end()" || exit 1

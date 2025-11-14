@@ -1,6 +1,12 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, NoSubscriberBehavior, getVoiceConnection, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, NoSubscriberBehavior, getVoiceConnection, entersState, VoiceConnectionStatus, AudioPlayerStatus } = require('@discordjs/voice');
 const { opus } = require('prism-media');
+const fs = require('fs');
+const path = require('path');
+const ffmpeg = require('ffmpeg-static');
 
 // Load configuration from environment variables
 const config = {
@@ -16,6 +22,9 @@ const config = {
         durationMax: parseInt(process.env.SESSION_DURATION_MAX || '72', 10),
         delayMin: parseInt(process.env.SESSION_DELAY_MIN || '75', 10),
         delayMax: parseInt(process.env.SESSION_DELAY_MAX || '105', 10)
+    },
+    sounds: {
+        folder: process.env.SOUNDS_PATH || process.env.SOUNDS_FOLDER || 'sounds'
     }
 };
 
@@ -33,10 +42,15 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildVoiceStates
-    ]
+    ],
+    presence: {
+        status: 'offline',
+        activities: []
+    }
 });
 
 let connection = null;
+let player = null;
 let checkInterval = null;
 let disconnectTimer = null;
 let sessionTimer = null;
@@ -65,6 +79,110 @@ function getRandomSessionDuration() {
 function hasOtherMembers(channel) {
     // Count members in the channel excluding the bot
     return channel.members.filter(member => !member.user.bot).size > 0;
+}
+
+function getRandomSoundFile() {
+    const soundsFolder = path.resolve(config.sounds.folder);
+    
+    // Check if folder exists
+    if (!fs.existsSync(soundsFolder)) {
+        console.log(`Sounds folder not found: ${soundsFolder}`);
+        return null;
+    }
+    
+    // Read all files from the sounds folder
+    const files = fs.readdirSync(soundsFolder);
+    
+    // Filter for audio files (mp3, wav, ogg, etc.)
+    const audioFiles = files.filter(file => {
+        const ext = path.extname(file).toLowerCase();
+        return ['.mp3', '.wav', '.ogg', '.m4a', '.flac'].includes(ext);
+    });
+    
+    if (audioFiles.length === 0) {
+        console.log('No audio files found in sounds folder');
+        return null;
+    }
+    
+    // Pick a random file
+    const randomFile = audioFiles[Math.floor(Math.random() * audioFiles.length)];
+    const soundPath = path.join(soundsFolder, randomFile);
+    
+    console.log(`Selected random sound: ${randomFile}`);
+    return soundPath;
+}
+
+async function playSound(soundFile) {
+    if (!player || !connection) {
+        console.log('Cannot play sound: player or connection not available');
+        return;
+    }
+
+    // Ensure connection is ready
+    try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 5e3);
+    } catch (error) {
+        console.error('Connection not ready:', error);
+        return;
+    }
+
+    // soundFile can be a full path or relative path
+    const soundPath = path.isAbsolute(soundFile) ? soundFile : path.resolve(soundFile);
+    
+    // Check if file exists
+    if (!fs.existsSync(soundPath)) {
+        console.log(`Sound file not found: ${soundPath}`);
+        return;
+    }
+
+    try {
+        console.log(`Playing sound: ${path.basename(soundPath)}`);
+        
+        // Detect file type from extension
+        const ext = path.extname(soundPath).toLowerCase();
+        let inputType = 'mp3'; // default
+        if (ext === '.wav') inputType = 'wav';
+        else if (ext === '.ogg') inputType = 'ogg';
+        else if (ext === '.m4a') inputType = 'm4a';
+        else if (ext === '.flac') inputType = 'flac';
+        
+        // Use ffmpeg to decode the audio file
+        // @discordjs/voice will automatically use ffmpeg-static if available
+        const resource = createAudioResource(soundPath, {
+            inputType: inputType,
+            inlineVolume: true
+        });
+        
+        // Small delay to ensure everything is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        player.play(resource);
+        console.log('Sound playback started');
+        
+        // Wait for the sound to finish playing
+        return new Promise((resolve) => {
+            // Listen for when the player becomes idle (sound finished)
+            const onStateChange = (oldState, newState) => {
+                console.log(`Player state changed: ${oldState.status} -> ${newState.status}`);
+                if (newState.status === AudioPlayerStatus.Idle && oldState.status !== AudioPlayerStatus.Idle) {
+                    player.off('stateChange', onStateChange);
+                    console.log('Sound finished playing');
+                    resolve();
+                }
+            };
+            
+            // If already idle, resolve immediately
+            if (player.state.status === AudioPlayerStatus.Idle) {
+                console.log('Player already idle');
+                resolve();
+            } else {
+                player.on('stateChange', onStateChange);
+            }
+        });
+    } catch (error) {
+        console.error(`Error playing sound ${soundFile}:`, error);
+        console.error('Error details:', error.stack);
+    }
 }
 
 function scheduleDisconnect(connection, delay = 3000) {
@@ -113,16 +231,16 @@ async function startRandomSession() {
         const sessionDuration = getRandomSessionDuration();
         console.log(`Session will last for ${Math.floor(sessionDuration / 60000)} minutes`);
         
-        sessionTimer = setTimeout(() => {
+        sessionTimer = setTimeout(async () => {
             console.log('Session time complete, disconnecting...');
-            safeDisconnect();
+            await safeDisconnect();
             scheduleNextSession();
         }, sessionDuration);
         
         return true;
     } catch (error) {
         console.error('Error in session:', error);
-        safeDisconnect();
+        await safeDisconnect();
         return false;
     }
 }
@@ -135,13 +253,13 @@ async function connectToVoice(guild, channel) {
             guildId: guild.id,
             adapterCreator: guild.voiceAdapterCreator,
             selfDeaf: false,
-            selfMute: true
+            selfMute: false
         });
 
         await entersState(connection, VoiceConnectionStatus.Ready, 30e3);
         console.log('Voice connection established');
         
-        const player = createAudioPlayer({
+        player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play
             }
@@ -156,6 +274,11 @@ async function connectToVoice(guild, channel) {
             console.log(`Player state: ${oldState.status} -> ${newState.status}`);
         });
 
+        // Add error handler to player (only once)
+        player.on('error', error => {
+            console.error('Audio player error:', error);
+        });
+
         connection.subscribe(player);
         console.log(`✅ Successfully joined ${channel.name} in ${guild.name}`);
         
@@ -168,20 +291,32 @@ async function connectToVoice(guild, channel) {
     }
 }
 
-function handleVoiceStateUpdate(oldState, newState) {
+async function handleVoiceStateUpdate(oldState, newState) {
     if (!connection) return;
     
     // Check if someone joined our channel
     if (newState.channelId === config.voiceChannelId && 
         newState.channelId !== oldState.channelId && 
         !newState.member.user.bot) {
-        console.log(`Member ${newState.member.user.tag} joined, disconnecting...`);
-        safeDisconnect();
+        console.log(`Member ${newState.member.user.tag} joined, playing sound and disconnecting...`);
+        
+        // Get a random sound file
+        const randomSound = getRandomSoundFile();
+        
+        // Play sound if one was found, otherwise just wait
+        if (randomSound) {
+            await playSound(randomSound);
+        } else {
+            console.log('No sound files available, waiting 3 seconds...');
+        }
+        
+        // Disconnect after 3 seconds delay
+        await safeDisconnect(3000);
         scheduleNextSession();
     }
 }
 
-function safeDisconnect(delay = 3000) {
+async function safeDisconnect(delay = 3000) {
     // Clear any existing timers
     if (sessionTimer) clearTimeout(sessionTimer);
     if (nextSessionTimeout) clearTimeout(nextSessionTimeout);
@@ -190,8 +325,21 @@ function safeDisconnect(delay = 3000) {
     client.off('voiceStateUpdate', handleVoiceStateUpdate);
 
     if (connection) {
-        console.log(`Waiting ${delay / 1000} seconds before disconnecting...`);
-        setTimeout(() => {
+        if (delay > 0) {
+            console.log(`Waiting ${delay / 1000} seconds before disconnecting...`);
+            setTimeout(() => {
+                try {
+                    connection.destroy();
+                    console.log('Disconnected from voice channel');
+                } catch (error) {
+                    console.error('Error disconnecting:', error);
+                } finally {
+                    connection = null;
+                    player = null;
+                }
+            }, delay);
+        } else {
+            // Disconnect immediately
             try {
                 connection.destroy();
                 console.log('Disconnected from voice channel');
@@ -199,8 +347,9 @@ function safeDisconnect(delay = 3000) {
                 console.error('Error disconnecting:', error);
             } finally {
                 connection = null;
+                player = null;
             }
-        }, delay);
+        }
     }
 }
 
@@ -230,17 +379,17 @@ function scheduleNextSession() {
 async function checkAndManageConnection() {
     try {
         console.log('Checking connection status...');
-        const guild = client.guilds.cache.get(guildId);
+        const guild = client.guilds.cache.get(config.guildId);
         if (!guild) {
-            console.error('Error: Guild not found with ID:', guildId);
+            console.error('Error: Guild not found with ID:', config.guildId);
             return;
         }
         
         console.log('Found guild:', guild.name);
         
-        const channel = guild.channels.cache.get(voiceChannelId);
+        const channel = guild.channels.cache.get(config.voiceChannelId);
         if (!channel) {
-            console.error('Error: Voice channel not found with ID:', voiceChannelId);
+            console.error('Error: Voice channel not found with ID:', config.voiceChannelId);
             console.log('Available voice channels:');
             const voiceChannels = guild.channels.cache.filter(c => c.type === 2); // 2 is GUILD_VOICE
             voiceChannels.forEach(c => console.log(`- ${c.name} (${c.id})`));
@@ -249,8 +398,8 @@ async function checkAndManageConnection() {
 
         console.log('Found voice channel:', channel.name);
         
-        const shouldBeConnected = isWithinTimeRange();
-        const isConnected = getVoiceConnection(guildId) !== null;
+        const shouldBeConnected = isWithinActiveHours();
+        const isConnected = getVoiceConnection(config.guildId) !== null;
         
         // Don't connect if there are other members in the channel
         if (shouldBeConnected && !isConnected && hasOtherMembers(channel)) {
@@ -269,7 +418,7 @@ async function checkAndManageConnection() {
                     guildId: guild.id,
                     adapterCreator: guild.voiceAdapterCreator,
                     selfDeaf: false,
-                    selfMute: true
+                    selfMute: false
                 });
 
                 try {
@@ -277,7 +426,7 @@ async function checkAndManageConnection() {
                     await entersState(connection, VoiceConnectionStatus.Ready, 30e3);
                     
                     console.log('Voice connection established, setting up audio player...');
-                    const player = createAudioPlayer({
+                    player = createAudioPlayer({
                         behaviors: {
                             noSubscriber: NoSubscriberBehavior.Play
                         }
@@ -373,6 +522,14 @@ async function checkAndManageConnection() {
 client.once('clientReady', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     
+    // Set bot to offline status (Discord bots cannot be invisible, only offline)
+    // This makes the bot appear offline but it will still function normally
+    await client.user.setPresence({
+        status: 'offline',
+        activities: []
+    });
+    console.log('Bot status set to offline (Discord bots cannot be invisible)');
+    
     // Start the first session check
     if (isWithinActiveHours()) {
         scheduleNextSession();
@@ -410,9 +567,9 @@ function scheduleDailyReset() {
     const delay = resetTime - now;
     console.log(`Next daily reset in ${Math.floor(delay / 3600000)} hours and ${Math.floor((delay % 3600000) / 60000)} minutes`);
     
-    setTimeout(() => {
+    setTimeout(async () => {
         console.log('Performing daily reset...');
-        safeDisconnect();
+        await safeDisconnect();
         // Schedule next day's first session
         const nextDay = new Date();
         nextDay.setDate(nextDay.getDate() + 1);

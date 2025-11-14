@@ -1,1 +1,4 @@
-node_modules/@snazzah/davey-win32-x64-msvc/davey.win32-x64-msvc.node
+node_modules
+package-lock.json
+.env
+sounds

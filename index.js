@@ -36,7 +36,11 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildVoiceStates
-    ]
+    ],
+    presence: {
+        status: 'offline',
+        activities: []
+    }
 });
 
 let connection = null;
@@ -376,11 +380,13 @@ async function checkAndManageConnection() {
 client.once('clientReady', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     
-    // Set bot to invisible status
-    client.user.setPresence({
-        status: 'invisible'
+    // Set bot to offline status (Discord bots cannot be invisible, only offline)
+    // This makes the bot appear offline but it will still function normally
+    await client.user.setPresence({
+        status: 'offline',
+        activities: []
     });
-    console.log('Bot status set to invisible');
+    console.log('Bot status set to offline (Discord bots cannot be invisible)');
     
     // Start the first session check
     if (isWithinActiveHours()) {

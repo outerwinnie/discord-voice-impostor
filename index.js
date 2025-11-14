@@ -24,7 +24,7 @@ const config = {
         delayMax: parseInt(process.env.SESSION_DELAY_MAX || '105', 10)
     },
     sounds: {
-        folder: process.env.SOUNDS_FOLDER || 'sounds'
+        folder: process.env.SOUNDS_PATH || process.env.SOUNDS_FOLDER || 'sounds'
     }
 };
 

@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const { Client, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, NoSubscriberBehavior, getVoiceConnection, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 const { opus } = require('prism-media');
@@ -135,7 +138,7 @@ async function connectToVoice(guild, channel) {
             guildId: guild.id,
             adapterCreator: guild.voiceAdapterCreator,
             selfDeaf: false,
-            selfMute: true
+            selfMute: false
         });
 
         await entersState(connection, VoiceConnectionStatus.Ready, 30e3);
@@ -230,17 +233,17 @@ function scheduleNextSession() {
 async function checkAndManageConnection() {
     try {
         console.log('Checking connection status...');
-        const guild = client.guilds.cache.get(guildId);
+        const guild = client.guilds.cache.get(config.guildId);
         if (!guild) {
-            console.error('Error: Guild not found with ID:', guildId);
+            console.error('Error: Guild not found with ID:', config.guildId);
             return;
         }
         
         console.log('Found guild:', guild.name);
         
-        const channel = guild.channels.cache.get(voiceChannelId);
+        const channel = guild.channels.cache.get(config.voiceChannelId);
         if (!channel) {
-            console.error('Error: Voice channel not found with ID:', voiceChannelId);
+            console.error('Error: Voice channel not found with ID:', config.voiceChannelId);
             console.log('Available voice channels:');
             const voiceChannels = guild.channels.cache.filter(c => c.type === 2); // 2 is GUILD_VOICE
             voiceChannels.forEach(c => console.log(`- ${c.name} (${c.id})`));
@@ -249,8 +252,8 @@ async function checkAndManageConnection() {
 
         console.log('Found voice channel:', channel.name);
         
-        const shouldBeConnected = isWithinTimeRange();
-        const isConnected = getVoiceConnection(guildId) !== null;
+        const shouldBeConnected = isWithinActiveHours();
+        const isConnected = getVoiceConnection(config.guildId) !== null;
         
         // Don't connect if there are other members in the channel
         if (shouldBeConnected && !isConnected && hasOtherMembers(channel)) {
@@ -269,7 +272,7 @@ async function checkAndManageConnection() {
                     guildId: guild.id,
                     adapterCreator: guild.voiceAdapterCreator,
                     selfDeaf: false,
-                    selfMute: true
+                    selfMute: false
                 });
 
                 try {
@@ -372,6 +375,12 @@ async function checkAndManageConnection() {
 
 client.once('clientReady', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+    
+    // Set bot to invisible status
+    client.user.setPresence({
+        status: 'invisible'
+    });
+    console.log('Bot status set to invisible');
     
     // Start the first session check
     if (isWithinActiveHours()) {
